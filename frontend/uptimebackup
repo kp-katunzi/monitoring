@@ -1,0 +1,234 @@
+import React, { useEffect, useState } from 'react';
+import api from '../../lib/axios'; // Update the path based on your project structure
+import { Card } from '../ui/card';
+import { Badge } from '../ui/badge';
+import { CheckCircle, XCircle, Clock, TrendingUp } from 'lucide-react';
+import { UptimeEvent, DomainStats, Domain } from '@/types'; // Adjust the import based on your types location
+
+// ... types remain the same
+
+export const UptimeMonitoring: React.FC = () => {
+  const [domainStats, setDomainStats] = useState<DomainStats[]>([]);
+  const [uptimeEvents, setUptimeEvents] = useState<UptimeEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+
+useEffect(() => {
+  const fetchStats = async () => {
+    try {
+      const { data: domains } = await api.get<Domain[]>(`/domains`);
+      const domainIds = domains.map(domain => domain.id);
+
+      const stats: DomainStats[] = [];
+      const events: UptimeEvent[][] = [];
+
+      // Fetch uptime data in parallel
+      const responses = await Promise.all(
+        domainIds.map(id => api.get(`/monitor/uptime/${id}`))
+      );
+
+      type UptimeApiResponse = {
+        checked_at: string;
+        status: 'UP' | 'DOWN';
+        response_time_ms: number | null;
+        domain?: string;
+      };
+
+      for (let i = 0; i < domainIds.length; i++) {
+        const id = domainIds[i];
+        const raw = responses[i].data as UptimeApiResponse;
+
+        // Convert raw response to event format
+        const event: UptimeEvent = {
+          checked_at: raw.checked_at,
+          status: raw.status,
+          response_time: raw.response_time_ms,
+        };
+
+        const domainName = raw.domain || `domain-${id}`;
+
+        const domainEventList = [event]; // only one event per domain under current backend
+
+        const uptimePercentage = calculateUptimePercentage(domainEventList);
+        const avgResponse = calculateAvgResponseTime(domainEventList);
+        const latestCheck = event.checked_at
+          ? new Date(event.checked_at).toLocaleTimeString()
+          : 'N/A';
+
+        stats.push({
+          id,
+          domain: domainName,
+          uptime: uptimePercentage,
+          avgResponseTime: avgResponse,
+          lastCheck: latestCheck,
+          status: raw.status,
+        });
+
+        events.push(domainEventList);
+
+        // Just show the first domain’s events for now
+        if (i === 0) {
+          setUptimeEvents(domainEventList);
+        }
+      }
+
+      setDomainStats(stats);
+    } catch (error) {
+      console.error('Error fetching uptime data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchStats();
+}, []);
+
+  
+const calculateUptimePercentage = (events: UptimeEvent[]) => {
+    const upCount = events.filter((e) => e.status === 'UP').length;
+    return events.length > 0 ? parseFloat(((upCount / events.length) * 100).toFixed(1)) : 0;
+  };
+
+  const calculateAvgResponseTime = (events: UptimeEvent[]) => {
+    const validResponses = events
+      .map((e) => e.response_time)
+      .filter((r) => r !== null) as number[];
+    if (validResponses.length === 0) return 0;
+    const sum = validResponses.reduce((a, b) => a + b, 0);
+    return Math.round(sum / validResponses.length);
+  };
+
+  const getStatusIcon = (status: 'UP' | 'DOWN') =>
+    status === 'UP' ? (
+      <CheckCircle className="h-4 w-4 text-green-500" />
+    ) : (
+      <XCircle className="h-4 w-4 text-red-500" />
+    );
+
+  const getUptimeColor = (uptime: number) => {
+    if (uptime >= 99) return 'text-green-600';
+    if (uptime >= 95) return 'text-yellow-600';
+    return 'text-red-600';
+  };
+
+  if (loading) {
+    return <div className="p-4">Loading uptime data...</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Summary Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Overall Uptime</p>
+              <p className="text-2xl font-bold text-green-600">
+                {calculateUptimePercentage(uptimeEvents)}%
+              </p>
+            </div>
+            <TrendingUp className="h-8 w-8 text-green-500" />
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Avg Response Time</p>
+              <p className="text-2xl font-bold">
+                {calculateAvgResponseTime(uptimeEvents)}ms
+              </p>
+            </div>
+            <Clock className="h-8 w-8 text-blue-500" />
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">Incidents</p>
+              <p className="text-2xl font-bold text-red-600">
+                {uptimeEvents.filter((e) => e.status === 'DOWN').length}
+              </p>
+            </div>
+            <XCircle className="h-8 w-8 text-red-500" />
+          </div>
+        </Card>
+      </div>
+
+      {/* Domain Status Overview */}
+      <Card className="p-6">
+        <h3 className="text-lg font-semibold mb-4">Domain Status Overview</h3>
+        <div className="space-y-4">
+          {domainStats.map((domain) => (
+            <div
+              key={domain.id}
+              className="flex items-center justify-between p-4 border border-border rounded-lg"
+            >
+              <div className="flex items-center space-x-4">
+                {getStatusIcon(domain.status)}
+                <div>
+                  <h4 className="font-medium">{domain.domain}</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Last checked {domain.lastCheck}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-6 text-sm">
+                <div className="text-center">
+                  <p className="font-medium">Uptime</p>
+                  <p className={`font-semibold ${getUptimeColor(domain.uptime)}`}>
+                    {domain.uptime}%
+                  </p>
+                </div>
+
+                <div className="text-center">
+                  <p className="font-medium">Response Time</p>
+                  <p className="font-semibold">
+                    {domain.avgResponseTime > 0 ? `${domain.avgResponseTime}ms` : 'N/A'}
+                  </p>
+                </div>
+
+                <Badge variant={domain.status === 'UP' ? 'default' : 'destructive'}>
+                  {domain.status}
+                </Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Recent Events */}
+      <Card className="p-6">
+        <h3 className="text-lg font-semibold mb-4">Recent Uptime Events</h3>
+        <div className="space-y-3">
+          {uptimeEvents.map((event, index) => (
+            <div
+              key={index}
+              className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
+            >
+              <div className="flex items-center space-x-3">
+                {getStatusIcon(event.status)}
+                <div>
+                  <p className="font-medium">Checked at</p>
+                  <p className="text-sm text-muted-foreground">
+                    {new Date(event.checked_at).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-4 text-sm">
+                <Badge variant={event.status === 'UP' ? 'default' : 'destructive'}>
+                  {event.status}
+                </Badge>
+                {event.response_time !== null && (
+                  <span className="text-muted-foreground">{event.response_time}ms</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+};

@@ -1,0 +1,8 @@
+Flask
+flask-cors
+flask-migrate
+PyJWT
+SQLAlchemy
+psycopg2-binary  # Assuming PostgreSQL as the database; change if using another
+python-dotenv    # Assuming you're using `config` to load env vars
+pymysql
