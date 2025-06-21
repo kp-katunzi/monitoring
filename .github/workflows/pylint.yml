@@ -31,4 +31,3 @@ jobs:
     - name: Run pylint
       run: |
       pylint $(git ls-files '*.py') || exit 0  # Prevent job failure on warnings only
-        pylint $(git ls-files '*.py') || exit 0  # Prevent job failure on warnings only
